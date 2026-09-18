@@ -4,8 +4,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 40s
 
-    cpus: "3.0"
-    mem_limit: 8g
+    cpus: "3.5"
+    mem_limit: 10g
     mem_reservation: 4g
     pids_limit: 512
     
