@@ -1,3 +1,5 @@
+#This is a fork of tsx's valheim server build with customizations for a dockhand/git VPS deployment on ARM/Ampere/Oracle 
+
 ## Base information
 The goal of this build is to enable running Valheim with mods, on both arm64 and amd64 platforms.
 
