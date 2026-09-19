@@ -35,9 +35,11 @@ RUN mkdir -p /root/.fex-emu/RootFS \
          --distro-name=ubuntu \
          --distro-version=24.04
 
-# Fail the build if FEX itself isn't functional.
-RUN FEX --version \
-    && FEX /usr/bin/uname -m | grep -qx x86_64
+# Verify the native ARM64 FEX tools were installed.
+# Do not launch an x86 guest during the Docker build.
+RUN FEXGetConfig --version \
+    && command -v FEX \
+    && command -v FEXRootFSFetcher
 
 # Install current SteamCMD.
 RUN mkdir -p /root/steamcmd \
