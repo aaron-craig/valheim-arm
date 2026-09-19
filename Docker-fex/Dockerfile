@@ -50,8 +50,7 @@ RUN mkdir -p /root/steamcmd \
        '#!/bin/bash' \
        'exec FEX /root/steamcmd/steamcmd.sh "$@"' \
        > /usr/local/bin/steamcmd.sh \
-    && chmod 0755 /usr/local/bin/steamcmd.sh \
-    && /usr/local/bin/steamcmd.sh +quit
+    && chmod 0755 /usr/local/bin/steamcmd.sh
 
 WORKDIR /root
 
