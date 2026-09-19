@@ -3,7 +3,7 @@
 # These settings reduce performance but increase compatibility:
 #BOX64_DYNAREC_STRONGMEM=1
 #BOX64_DYNAREC_BIGBLOCK=0
-BOX64_LOG=1
+BOX64_LOG=0
 BOX64_SHOWSEGV=1
 BOX64_SHOWBT=1
 BOX64_ROLLING_LOG=32
