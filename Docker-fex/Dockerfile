@@ -97,7 +97,26 @@ RUN FEXGetConfig --version \
     && command -v FEXRootFSFetcher \
     && test -d "${FEX_ROOTFS}" \
     && test -x "${FEX_ROOTFS}/usr/bin/uname"
+# ---------------------------------------------------------------------------
+# x86-64 runtime dependency for PlayFab Party
+#
+# libparty.so requires libatomic.so.1. The outer container is ARM64, so its
+# libatomic1 package is the wrong architecture. Download the Ubuntu 24.04
+# amd64 package and extract it directly into the FEX x86-64 RootFS.
+# ---------------------------------------------------------------------------
 
+RUN dpkg --add-architecture amd64 \
+    && apt-get update \
+    && mkdir -p /tmp/amd64-libs \
+    && cd /tmp/amd64-libs \
+    && apt-get download libatomic1:amd64 \
+    && dpkg-deb -x ./libatomic1_*_amd64.deb "${FEX_ROOTFS}" \
+    && test -e "${FEX_ROOTFS}/usr/lib/x86_64-linux-gnu/libatomic.so.1" \
+    && cd / \
+    && rm -rf /tmp/amd64-libs \
+    && rm -rf /var/lib/apt/lists/* \
+    && dpkg --remove-architecture amd64
+    
 # ---------------------------------------------------------------------------
 # SteamCMD
 #
