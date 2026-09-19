@@ -3,8 +3,6 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Current official Ubuntu 24.04 x86-64 RootFS from FEX.
-# Source:
-# https://github.com/FEX-Emu/RootFS/blob/main/RootFS_links.json
 ARG FEX_ROOTFS_URL="https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh"
 
 ENV LANG=en_US.UTF-8 \
@@ -14,10 +12,10 @@ ENV LANG=en_US.UTF-8 \
     XDG_DATA_HOME=/root/.local/share \
     FEX_APP_DATA_LOCATION=/root/.local/share/fex-emu \
     FEX_APP_CONFIG_LOCATION=/root/.fex-emu \
-    FEX_ROOTFS=/opt/fex-rootfs/Ubuntu_24_04.sqsh
+    FEX_ROOTFS=/opt/fex-rootfs/Ubuntu_24_04
 
 # ---------------------------------------------------------------------------
-# Native ARM64 host dependencies
+# Native ARM64 dependencies
 # ---------------------------------------------------------------------------
 
 RUN apt-get update \
@@ -31,7 +29,6 @@ RUN apt-get update \
         squashfs-tools \
         libatomic1 \
         libpulse0 \
-        libpulse-dev \
     && locale-gen en_US.UTF-8 \
     && update-locale LANG=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
@@ -39,8 +36,7 @@ RUN apt-get update \
 # ---------------------------------------------------------------------------
 # FEX-Emu
 #
-# Ampere supports ARMv8.2, so use the optimized armv8.2 package.
-# The official FEX PPA is updated with FEX releases.
+# Oracle Ampere is ARMv8.2-capable, so use the ARMv8.2 FEX package.
 # ---------------------------------------------------------------------------
 
 RUN add-apt-repository -y ppa:fex-emu/fex \
@@ -52,9 +48,14 @@ RUN add-apt-repository -y ppa:fex-emu/fex \
 # ---------------------------------------------------------------------------
 # FEX x86-64 RootFS
 #
-# Do not depend on FEXRootFSFetcher to select/configure the RootFS.
-# Download the official FEX Ubuntu 24.04 SquashFS image directly and point
-# FEX_ROOTFS at an absolute, immutable path.
+# Download the official compressed RootFS during the image build, extract it,
+# then delete the SquashFS.
+#
+# Runtime FEX uses the extracted directory directly. This avoids:
+#   - /dev/fuse
+#   - SYS_ADMIN
+#   - privileged mode
+#   - runtime SquashFS mounts
 # ---------------------------------------------------------------------------
 
 RUN mkdir -p \
@@ -68,31 +69,39 @@ RUN mkdir -p \
         --retry-delay 2 \
         --retry-all-errors \
         "${FEX_ROOTFS_URL}" \
-        --output "${FEX_ROOTFS}" \
-    && test -s "${FEX_ROOTFS}" \
-    && unsquashfs -s "${FEX_ROOTFS}" >/dev/null \
-    && printf '{"Config":{"RootFS":"%s"}}\n' "${FEX_ROOTFS}" \
-        > "${FEX_APP_CONFIG_LOCATION}/Config.json"
+        --output /tmp/Ubuntu_24_04.sqsh \
+    && echo "=== Validating downloaded RootFS ===" \
+    && unsquashfs -s /tmp/Ubuntu_24_04.sqsh \
+    && rm -rf "${FEX_ROOTFS}" \
+    && echo "=== Extracting FEX RootFS ===" \
+    && unsquashfs \
+        -f \
+        -d "${FEX_ROOTFS}" \
+        /tmp/Ubuntu_24_04.sqsh \
+    && rm -f /tmp/Ubuntu_24_04.sqsh \
+    && test -d "${FEX_ROOTFS}" \
+    && test -x "${FEX_ROOTFS}/usr/bin/uname" \
+    && echo "=== Extracted RootFS ===" \
+    && du -sh "${FEX_ROOTFS}"
 
 # ---------------------------------------------------------------------------
 # Validate native FEX installation.
 #
-# Do NOT run an x86-64 guest application during the Docker build.
-# Guest execution will be verified after the container starts.
+# Do not execute an x86-64 guest binary during Docker build. BuildKit can
+# impose restrictions that do not exist in the final running container.
 # ---------------------------------------------------------------------------
 
 RUN FEXGetConfig --version \
     && command -v FEX \
     && command -v FEXGetConfig \
     && command -v FEXRootFSFetcher \
-    && test -f "${FEX_ROOTFS}" \
-    && test -f "${FEX_APP_CONFIG_LOCATION}/Config.json"
+    && test -d "${FEX_ROOTFS}" \
+    && test -x "${FEX_ROOTFS}/usr/bin/uname"
 
 # ---------------------------------------------------------------------------
 # SteamCMD
 #
-# Valve ships SteamCMD as x86/x86-64 binaries. The wrapper runs it through
-# FEX when the container is running.
+# SteamCMD is x86/x86-64, so the wrapper launches it through FEX.
 # ---------------------------------------------------------------------------
 
 RUN mkdir -p /root/steamcmd /root/.steam \
