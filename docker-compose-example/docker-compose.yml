@@ -1,8 +1,12 @@
 services:
   valheim_server:
+    build:
+      context: ../Docker
+      dockerfile: Dockerfile
     image: tsxcloud/valheim-arm:latest
+    init: true
     restart: unless-stopped
-    stop_grace_period: 40s
+    stop_grace_period: 120s
 
     cpus: "3.5"
     mem_limit: 10g
@@ -13,6 +17,12 @@ services:
       - "2456:2456/udp"
       - "2457:2457/udp"
       - "2458:2458/udp"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
     
     environment:
       SERVER_NAME: ${SERVER_NAME}
