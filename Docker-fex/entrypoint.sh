@@ -33,7 +33,7 @@ mkdir -p "${PERSISTENT}/logs"
 echo "========================================"
 echo "FEX version"
 echo "========================================"
-FEX --version
+FEXGetConfig --version
 echo
 
 echo "========================================"
