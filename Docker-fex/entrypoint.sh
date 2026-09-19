@@ -1,127 +1,118 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-SERVER=/root/valheim-server
+SERVER="/root/valheim-server"
 PERSISTENT="/root/.config/unity3d/IronGate/Valheim"
 SETTINGS="${PERSISTENT}/settings"
 
-# Quick function to generate a timestamp
-timestamp () {
-  date +"%Y-%m-%d %H:%M:%S,%3N"
+valheim_pid=""
+shutdown_requested=0
+
+timestamp() {
+    date +"%Y-%m-%d %H:%M:%S,%3N"
 }
 
-shutdown () {
-    echo ""
-    echo "$(timestamp) INFO: Recieved SIGTERM, shutting down gracefully"
-    kill -2 $valheim_pid
-}
+shutdown() {
+    shutdown_requested=1
 
-# Set our trap
-trap 'shutdown' TERM
+    echo
+    echo "$(timestamp) INFO: Shutdown requested."
 
-echo "Load extra Box64 and Fex-emu settings from emulators.rc"
-source /load_emulators_env.sh
-echo " "
-
-/print_app_versions.sh
-
-echo "Update"
-export SteamAppId=892970
-steamcmd.sh +force_install_dir ${SERVER} +login anonymous +app_update 896660 +quit
-
-echo "Checking if BepInEx files need to be copied"
-mkdir -p "${SERVER}"
-if [ ! -d "${SERVER}/BepInEx" ]; then
-    echo "Copy BepInEx files"
-	cp -r defaults/server/. "${SERVER}/"
-else
-    echo "The folder ${SERVER}/BepInEx already exists, copying is not needed."
-fi
-echo " "
-
-echo "Load vars for valheim_server.x86_64"
-####
-export DOORSTOP_ENABLED=1
-export DOORSTOP_TARGET_ASSEMBLY=./BepInEx/core/BepInEx.Preloader.dll
-
-export LD_LIBRARY_PATH="./doorstop_libs:$LD_LIBRARY_PATH"
-export LD_LIBRARY_PATH="./linux64:$LD_LIBRARY_PATH"
-####
-
-echo "Starting server PRESS CTRL-C to exit"
-echo " "
-cd ${SERVER}
-
-if [[ ! -f ${SERVER}/linux64/libpulse-mainloop-glib.so.0 ]]; then
-    echo "Installing libpulse-mainloop-glib.so.0:x86_64"
-    mkdir -p "${SERVER}/linux64/"
-    pushd "$(mktemp -d)"
-    wget http://mirrors.edge.kernel.org/ubuntu/pool/main/p/pulseaudio/libpulse-mainloop-glib0_17.0%2Bdfsg1-2ubuntu3_amd64.deb
-    dpkg -x libpulse-mainloop-glib0_17.0+dfsg1-2ubuntu3_amd64.deb ./
-    cp usr/lib/x86_64-linux-gnu/libpulse-mainloop-glib.so.0 "${SERVER}/linux64/"
-    echo "Installing libpulse-mainloop-glib.so.0:x86_64 - Done"
-    popd
-fi
-
-sed -i "s/^enabled *=.*/enabled = ${ENABLE_PLUGINS}/" "${SERVER}/doorstop_config.ini"
-if [ "$ENABLE_PLUGINS" = "true" ]; then
-    echo "Plugins support is ENABLED"
-    export LD_PRELOAD="libdoorstop_x64.so:$LD_PRELOAD"
-else
-    echo "Plugins support is DISABLED"
-fi
-
-if [ "$ENABLE_CROSSPLAY" = "true" ]; then
-    echo "Crossplay is ENABLED"
-    CROSSPLAY_FLAG="-crossplay"
-else
-    echo "Crossplay is DISABLED"
-    CROSSPLAY_FLAG=""
-fi
-
-mkdir -p "${PERSISTENT}/logs"
-LOG_FILE="${PERSISTENT}/logs/valheim_$(date '+%d-%m-%Y').log"
-
-$runx64 ./valheim_server.x86_64 \
-    -name "$SERVER_NAME" \
-    -port 2456 \
-    -world "$SERVER_WORLD" \
-    -password "$SERVER_PASSWORD" \
-    -public $SERVER_VISIBILITY \
-    -saveinterval $SERVER_SAVE_INTERVAL \
-    -backups $SERVER_BACKUPS \
-    -backupshort $SERVER_BACKUP_SHORT \
-    -backuplong $SERVER_BACKUP_LONG \
-    -savedir ${PERSISTENT} \
-    ${CROSSPLAY_FLAG:+"$CROSSPLAY_FLAG"} \
-    -nographics  \
-    -batchmode \
-    2>&1 | tee -a ${LOG_FILE} &
-
-#export LD_LIBRARY_PATH=$templdpath
-
-# Find pid for valheim_server
-timeout=0
-while [ $timeout -lt 11 ]; do
-    if ps -e | grep "FEXInterpreter"; then
-        valheim_pid=$(ps -e | grep "FEXInterpreter" | awk '{print $1}')
-        break
-    elif [ $timeout -eq 10 ]; then
-        echo "$(timestamp) ERROR: Timed out waiting for valheim_server to be running"
-        exit 1
+    if [[ -n "${valheim_pid}" ]] && kill -0 "${valheim_pid}" 2>/dev/null; then
+        echo "$(timestamp) INFO: Sending SIGINT to FEX/Valheim PID ${valheim_pid}"
+        kill -INT "${valheim_pid}"
     fi
-    sleep 6
-    ((timeout++))
-    echo "$(timestamp) INFO: Waiting for valheim_server to be running"
-done
+}
 
-echo " "
-# Hold us open until we recieve a SIGTERM
-wait
+trap shutdown TERM INT
 
-# Handle post SIGTERM from here
-# Hold us open until WSServer-Linux pid closes, indicating full shutdown, then go home
-tail --pid=$valheim_pid -f /dev/null
+mkdir -p "${SERVER}"
+mkdir -p "${SETTINGS}"
+mkdir -p "${PERSISTENT}/logs"
 
-# o7
-echo "$(timestamp) INFO: Shutdown complete."
-exit 0
+echo "========================================"
+echo "FEX version"
+echo "========================================"
+FEX --version
+echo
+
+echo "========================================"
+echo "FEX guest architecture"
+echo "========================================"
+FEX /usr/bin/uname -m
+echo
+
+# Load only FEX_* settings from the persistent emulator config.
+if [[ -f "${SETTINGS}/emulators.rc" ]]; then
+    echo "$(timestamp) INFO: Loading FEX settings from emulators.rc"
+
+    while IFS='=' read -r key value; do
+        [[ "${key}" =~ ^FEX_[A-Za-z0-9_]+$ ]] || continue
+
+        export "${key}=${value}"
+        echo "export ${key}=${value}"
+    done < <(
+        grep -E '^[[:space:]]*FEX_[A-Za-z0-9_]+=' \
+            "${SETTINGS}/emulators.rc" |
+        sed 's/^[[:space:]]*//'
+    )
+fi
+
+echo
+echo "$(timestamp) INFO: Updating Valheim dedicated server"
+
+export SteamAppId=892970
+
+/usr/local/bin/steamcmd.sh \
+    +force_install_dir "${SERVER}" \
+    +login anonymous \
+    +app_update 896660 \
+    +quit
+
+cd "${SERVER}"
+
+CROSSPLAY_FLAG=""
+
+if [[ "${ENABLE_CROSSPLAY:-false}" == "true" ]]; then
+    CROSSPLAY_FLAG="-crossplay"
+    echo "$(timestamp) INFO: Crossplay enabled."
+fi
+
+LOG_FILE="${PERSISTENT}/logs/valheim_$(date '+%Y-%m-%d').log"
+
+echo "$(timestamp) INFO: Starting Valheim under FEX."
+
+FEX ./valheim_server.x86_64 \
+    -name "${SERVER_NAME}" \
+    -port 2456 \
+    -world "${SERVER_WORLD}" \
+    -password "${SERVER_PASSWORD}" \
+    -public "${SERVER_VISIBILITY:-1}" \
+    -saveinterval "${SERVER_SAVE_INTERVAL:-1800}" \
+    -backups "${SERVER_BACKUPS:-4}" \
+    -backupshort "${SERVER_BACKUP_SHORT:-7200}" \
+    -backuplong "${SERVER_BACKUP_LONG:-43200}" \
+    -savedir "${PERSISTENT}" \
+    ${CROSSPLAY_FLAG:+"${CROSSPLAY_FLAG}"} \
+    -nographics \
+    -batchmode \
+    > >(tee -a "${LOG_FILE}") 2>&1 &
+
+valheim_pid=$!
+
+echo "$(timestamp) INFO: Monitoring FEX/Valheim PID ${valheim_pid}"
+
+set +e
+wait "${valheim_pid}"
+exit_code=$?
+set -e
+
+if [[ "${shutdown_requested}" -eq 1 ]]; then
+    echo "$(timestamp) INFO: Valheim exited after requested shutdown."
+    exit 0
+fi
+
+echo "$(timestamp) ERROR: Valheim exited unexpectedly with code ${exit_code}."
+echo "$(timestamp) ERROR: Container will exit so Docker can restart it."
+
+exit 1
