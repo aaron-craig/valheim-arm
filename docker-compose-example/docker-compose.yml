@@ -1,9 +1,10 @@
 services:
   valheim_server:
     build:
-      context: ../Docker
+      context: ../Docker-fex
       dockerfile: Dockerfile
-    image: tsxcloud/valheim-arm:latest
+    image: valheim-arm:aaron-fex
+    
     init: true
     restart: unless-stopped
     stop_grace_period: 120s
