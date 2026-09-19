@@ -2,8 +2,19 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Current official Ubuntu 24.04 x86-64 RootFS from FEX.
+# ---------------------------------------------------------------------------
+# Versions / sources
+# ---------------------------------------------------------------------------
+
+# Official FEX Ubuntu 24.04 x86-64 RootFS.
 ARG FEX_ROOTFS_URL="https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh"
+
+# Ubuntu 24.04 amd64 libatomic package required by PlayFab Party.
+ARG LIBATOMIC_VERSION="14.2.0-4ubuntu2~24.04.1"
+
+# ---------------------------------------------------------------------------
+# Runtime environment
+# ---------------------------------------------------------------------------
 
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
@@ -36,7 +47,7 @@ RUN apt-get update \
 # ---------------------------------------------------------------------------
 # FEX-Emu
 #
-# Oracle Ampere is ARMv8.2-capable, so use the ARMv8.2 FEX package.
+# Oracle Ampere supports ARMv8.2, so use the optimized ARMv8.2 package.
 # ---------------------------------------------------------------------------
 
 RUN add-apt-repository -y ppa:fex-emu/fex \
@@ -48,10 +59,10 @@ RUN add-apt-repository -y ppa:fex-emu/fex \
 # ---------------------------------------------------------------------------
 # FEX x86-64 RootFS
 #
-# Download the official compressed RootFS during the image build, extract it,
-# then delete the SquashFS.
+# Download the official SquashFS during build, extract it into the image,
+# then delete the compressed image.
 #
-# Runtime FEX uses the extracted directory directly. This avoids:
+# FEX therefore uses a normal directory at runtime and does NOT require:
 #   - /dev/fuse
 #   - SYS_ADMIN
 #   - privileged mode
@@ -70,7 +81,7 @@ RUN mkdir -p \
         --retry-all-errors \
         "${FEX_ROOTFS_URL}" \
         --output /tmp/Ubuntu_24_04.sqsh \
-    && echo "=== Validating downloaded RootFS ===" \
+    && echo "=== Validating FEX RootFS image ===" \
     && unsquashfs -s /tmp/Ubuntu_24_04.sqsh \
     && rm -rf "${FEX_ROOTFS}" \
     && echo "=== Extracting FEX RootFS ===" \
@@ -81,14 +92,48 @@ RUN mkdir -p \
     && rm -f /tmp/Ubuntu_24_04.sqsh \
     && test -d "${FEX_ROOTFS}" \
     && test -x "${FEX_ROOTFS}/usr/bin/uname" \
-    && echo "=== Extracted RootFS ===" \
+    && echo "=== Extracted FEX RootFS ===" \
     && du -sh "${FEX_ROOTFS}"
 
 # ---------------------------------------------------------------------------
-# Validate native FEX installation.
+# x86-64 libatomic for PlayFab Party
 #
-# Do not execute an x86-64 guest binary during Docker build. BuildKit can
-# impose restrictions that do not exist in the final running container.
+# libparty.so is x86-64 and requires libatomic.so.1.
+#
+# The outer Ubuntu container is ARM64, so its normal libatomic1 package is
+# ARM64 and cannot satisfy the PlayFab plugin. Download the official amd64
+# Ubuntu package directly and extract it into the FEX guest RootFS.
+#
+# Do NOT enable amd64 as a host-container dpkg architecture.
+# ---------------------------------------------------------------------------
+
+RUN curl \
+        --fail \
+        --location \
+        --retry 5 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        "https://security.ubuntu.com/ubuntu/pool/main/g/gcc-14/libatomic1_${LIBATOMIC_VERSION}_amd64.deb" \
+        --output /tmp/libatomic1_amd64.deb \
+    && echo "=== Validating libatomic package architecture ===" \
+    && test "$(dpkg-deb -f /tmp/libatomic1_amd64.deb Architecture)" = "amd64" \
+    && echo "=== Installing x86-64 libatomic into FEX RootFS ===" \
+    && dpkg-deb \
+        -x \
+        /tmp/libatomic1_amd64.deb \
+        "${FEX_ROOTFS}" \
+    && test -e \
+        "${FEX_ROOTFS}/usr/lib/x86_64-linux-gnu/libatomic.so.1" \
+    && echo "=== Installed x86-64 libatomic ===" \
+    && ls -l \
+        "${FEX_ROOTFS}/usr/lib/x86_64-linux-gnu/libatomic.so.1"* \
+    && rm -f /tmp/libatomic1_amd64.deb
+
+# ---------------------------------------------------------------------------
+# Validate FEX installation
+#
+# Only validate native ARM64 FEX tools during Docker build.
+# Do not launch an x86-64 guest process from BuildKit.
 # ---------------------------------------------------------------------------
 
 RUN FEXGetConfig --version \
@@ -96,31 +141,13 @@ RUN FEXGetConfig --version \
     && command -v FEXGetConfig \
     && command -v FEXRootFSFetcher \
     && test -d "${FEX_ROOTFS}" \
-    && test -x "${FEX_ROOTFS}/usr/bin/uname"
-# ---------------------------------------------------------------------------
-# x86-64 runtime dependency for PlayFab Party
-#
-# libparty.so requires libatomic.so.1. The outer container is ARM64, so its
-# libatomic1 package is the wrong architecture. Download the Ubuntu 24.04
-# amd64 package and extract it directly into the FEX x86-64 RootFS.
-# ---------------------------------------------------------------------------
+    && test -x "${FEX_ROOTFS}/usr/bin/uname" \
+    && test -e "${FEX_ROOTFS}/usr/lib/x86_64-linux-gnu/libatomic.so.1"
 
-RUN dpkg --add-architecture amd64 \
-    && apt-get update \
-    && mkdir -p /tmp/amd64-libs \
-    && cd /tmp/amd64-libs \
-    && apt-get download libatomic1:amd64 \
-    && dpkg-deb -x ./libatomic1_*_amd64.deb "${FEX_ROOTFS}" \
-    && test -e "${FEX_ROOTFS}/usr/lib/x86_64-linux-gnu/libatomic.so.1" \
-    && cd / \
-    && rm -rf /tmp/amd64-libs \
-    && rm -rf /var/lib/apt/lists/* \
-    && dpkg --remove-architecture amd64
-    
 # ---------------------------------------------------------------------------
 # SteamCMD
 #
-# SteamCMD is x86/x86-64, so the wrapper launches it through FEX.
+# SteamCMD contains x86/x86-64 binaries. The wrapper runs it through FEX.
 # ---------------------------------------------------------------------------
 
 RUN mkdir -p /root/steamcmd /root/.steam \
@@ -132,7 +159,9 @@ RUN mkdir -p /root/steamcmd /root/.steam \
         --retry-all-errors \
         "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" \
         --output /tmp/steamcmd_linux.tar.gz \
-    && tar -xzf /tmp/steamcmd_linux.tar.gz -C /root/steamcmd \
+    && tar \
+        -xzf /tmp/steamcmd_linux.tar.gz \
+        -C /root/steamcmd \
     && rm -f /tmp/steamcmd_linux.tar.gz \
     && chmod 0755 /root/steamcmd/steamcmd.sh \
     && printf '%s\n' \
@@ -141,10 +170,12 @@ RUN mkdir -p /root/steamcmd /root/.steam \
         'exec FEX /root/steamcmd/steamcmd.sh "$@"' \
         > /usr/local/bin/steamcmd \
     && chmod 0755 /usr/local/bin/steamcmd \
-    && ln -sf /usr/local/bin/steamcmd /usr/local/bin/steamcmd.sh
+    && ln -sf \
+        /usr/local/bin/steamcmd \
+        /usr/local/bin/steamcmd.sh
 
 # ---------------------------------------------------------------------------
-# Valheim container
+# Valheim
 # ---------------------------------------------------------------------------
 
 WORKDIR /root
