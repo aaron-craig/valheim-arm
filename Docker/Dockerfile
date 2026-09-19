@@ -3,10 +3,9 @@ FROM tsxcloud/steamcmd-wine-ntsync:10.20-arm64-box@sha256:623c85deed796bb37a7185
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libatomic1 \
-        libpulse0 \
-    && apt-get clean \
+    && apt-get install -y --no-install-recommends --only-upgrade box64 \
+    && box64 --version \
+    && ! box64 --version 2>&1 | grep -q 'v0\.3\.9' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root
