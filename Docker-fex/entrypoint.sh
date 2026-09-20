@@ -189,6 +189,8 @@ fi
 # Valheim ships additional x86-64 libraries here.
 export LD_LIBRARY_PATH="${SERVER}/linux64:${SERVER}/valheim_server_Data/Plugins:/usr/lib/x86_64-linux-gnu/pulseaudio:${LD_LIBRARY_PATH:-}"
 
+echo "$(timestamp) INFO: LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+
 cd "${SERVER}"
 
 # ---------------------------------------------------------------------------
