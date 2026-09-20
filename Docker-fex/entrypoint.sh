@@ -187,7 +187,7 @@ if [[ ! -x "${SERVER}/valheim_server.x86_64" ]]; then
 fi
 
 # Valheim ships additional x86-64 libraries here.
-export LD_LIBRARY_PATH="${SERVER}/linux64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${SERVER}/linux64:${SERVER}/valheim_server_Data/Plugins:/usr/lib/x86_64-linux-gnu/pulseaudio:${LD_LIBRARY_PATH:-}"
 
 cd "${SERVER}"
 
