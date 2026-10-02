@@ -40,11 +40,20 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'pgrep -f "[v]alheim_server.x86_64" >/dev/null || exit 1'
-      interval: 30s
+        - >-
+          if [ -f /tmp/valheim-fatal ]; then
+            echo "Fatal FEX/Valheim condition detected - terminating stuck process";
+            pid=$$(pgrep -f '[v]alheim_server.x86_64' | head -n1);
+            if [ -n "$$pid" ]; then
+              kill -KILL "$$pid";
+            fi;
+            exit 1;
+          fi;
+          pgrep -f '[v]alheim_server.x86_64' >/dev/null || exit 1
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 180s
+      retries: 1
+      start_period: 120s
     
     volumes:
       - valheim-server:/root/valheim-server
