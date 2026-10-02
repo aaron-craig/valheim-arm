@@ -209,6 +209,31 @@ fi
 LOG_FILE="${LOG_DIR}/valheim_$(date '+%Y-%m-%d').log"
 
 # ---------------------------------------------------------------------------
+# Fatal-error watchdog
+# ---------------------------------------------------------------------------
+
+# Remove a stale marker from a previous container run.
+rm -f /tmp/valheim-fatal
+
+# Watch only new log output. If FEX/Valheim reports one of the native
+# failures we have been seeing, create a marker for the Docker healthcheck.
+(
+    tail -n0 -F "${LOG_FILE}" 2>/dev/null |
+    while IFS= read -r line; do
+        case "${line}" in
+            *"Caught fatal signal"*|\
+            *"pure virtual method called"*|\
+            *"terminate called without an active exception"*|\
+            *"Segmentation fault"*)
+                echo "$(timestamp) ERROR: Fatal Valheim/FEX condition detected: ${line}" >&2
+                touch /tmp/valheim-fatal
+                break
+                ;;
+        esac
+    done
+) &
+
+# ---------------------------------------------------------------------------
 # Launch
 # ---------------------------------------------------------------------------
 
