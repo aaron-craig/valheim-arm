@@ -169,11 +169,44 @@ echo "$(timestamp) INFO: Updating Valheim dedicated server."
 
 export SteamAppId=892970
 
-/usr/local/bin/steamcmd \
-    +force_install_dir "${SERVER}" \
-    +login anonymous \
-    +app_update 896660 \
-    +quit
+# ---------------------------------------------------------------------------
+# SteamCMD update with fallback to existing installation
+# ---------------------------------------------------------------------------
+
+STEAM_LOG="${LOG_DIR}/steamcmd-last.log"
+steamcmd_rc=0
+
+if [[ "${SKIP_STEAM_UPDATE:-false}" == "true" ]]; then
+    echo "$(timestamp) WARNING: Skipping SteamCMD update."
+else
+    echo "$(timestamp) INFO: Checking Valheim for updates."
+
+    /usr/local/bin/steamcmd \
+        +force_install_dir "${SERVER}" \
+        +login anonymous \
+        +app_update 896660 \
+        +quit 2>&1 | tee "${STEAM_LOG}" || steamcmd_rc=$?
+
+    # SteamCMD can report an update error without a useful exit code.
+    if (( steamcmd_rc != 0 )) || \
+       ! grep -Fq "Success! App '896660'" "${STEAM_LOG}"; then
+
+        echo "$(timestamp) WARNING: SteamCMD update failed."
+
+        if [[ -x "${SERVER}/valheim_server.x86_64" ]] && \
+           [[ -f "${SERVER}/valheim_server_Data/Managed/Assembly-CSharp.dll" ]]; then
+
+            echo "$(timestamp) WARNING: Existing Valheim files found."
+            echo "$(timestamp) WARNING: Attempting to start existing installation."
+
+        else
+            echo "$(timestamp) ERROR: No usable Valheim installation found."
+            exit 1
+        fi
+    else
+        echo "$(timestamp) INFO: SteamCMD update successful."
+    fi
+fi
 
 if [[ "${shutdown_requested}" -eq 1 ]]; then
     echo "$(timestamp) INFO: Shutdown was requested during update. Not starting Valheim."
