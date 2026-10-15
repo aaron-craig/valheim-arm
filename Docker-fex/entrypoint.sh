@@ -173,38 +173,71 @@ export SteamAppId=892970
 # SteamCMD update with fallback to existing installation
 # ---------------------------------------------------------------------------
 
+# Keep depot metadata with the installed game, including across image rebuilds.
+# Migrate any cache already present in this container before replacing its path.
+DEPOT_CACHE="${SERVER}/.steam-depotcache"
+mkdir -p "${DEPOT_CACHE}"
+if [[ ! -L /root/steamcmd/depotcache ]]; then
+    if [[ -d /root/steamcmd/depotcache ]]; then
+        cp -an /root/steamcmd/depotcache/. "${DEPOT_CACHE}/"
+        mv /root/steamcmd/depotcache "/root/steamcmd/depotcache.pre-persist.$(date +%s).$$"
+    elif [[ -e /root/steamcmd/depotcache ]]; then
+        echo "$(timestamp) ERROR: Unexpected file at /root/steamcmd/depotcache"
+        exit 1
+    fi
+    ln -s "${DEPOT_CACHE}" /root/steamcmd/depotcache
+elif [[ "$(readlink -f /root/steamcmd/depotcache)" != "$(readlink -f "${DEPOT_CACHE}")" ]]; then
+    echo "$(timestamp) ERROR: Unexpected depotcache symlink; inspect before migrating."
+    exit 1
+fi
+
 STEAM_LOG="${LOG_DIR}/steamcmd-last.log"
-steamcmd_rc=0
+
+run_steam_update() {
+    local rc=0
+    /usr/local/bin/steamcmd \
+        +force_install_dir "${SERVER}" \
+        +login anonymous \
+        +app_update 896660 "$@" \
+        +quit 2>&1 | tee "${STEAM_LOG}" || rc=$?
+
+    # SteamCMD can report failure with exit code zero.
+    (( rc == 0 )) && grep -Fq "Success! App '896660'" "${STEAM_LOG}"
+}
 
 if [[ "${SKIP_STEAM_UPDATE:-false}" == "true" ]]; then
     echo "$(timestamp) WARNING: Skipping SteamCMD update."
 else
     echo "$(timestamp) INFO: Checking Valheim for updates."
+    update_ok=0
+    if run_steam_update; then
+        update_ok=1
+    elif [[ "${shutdown_requested}" -eq 0 ]] && \
+         grep -Fq "App '896660' state is 0x6 after update job" "${STEAM_LOG}" && \
+         [[ -f "${SERVER}/steamapps/appmanifest_896660.acf" ]]; then
+        # 0x6 alone is not a diagnosis. Try this bounded metadata recovery;
+        # retain the original log and manifest for investigation if it fails.
+        recovery_stamp="$(date +%Y%m%dT%H%M%S).$$"
+        cp "${STEAM_LOG}" "${LOG_DIR}/steamcmd-before-recovery-${recovery_stamp}.log"
+        mv "${SERVER}/steamapps/appmanifest_896660.acf" \
+            "${SERVER}/steamapps/appmanifest_896660.acf.denied.${recovery_stamp}"
+        echo "$(timestamp) WARNING: SteamCMD returned 0x6; saved manifest and retrying once with validation."
+        if run_steam_update validate; then
+            update_ok=1
+        fi
+    fi
 
-    /usr/local/bin/steamcmd \
-        +force_install_dir "${SERVER}" \
-        +login anonymous \
-        +app_update 896660 \
-        +quit 2>&1 | tee "${STEAM_LOG}" || steamcmd_rc=$?
-
-    # SteamCMD can report an update error without a useful exit code.
-    if (( steamcmd_rc != 0 )) || \
-       ! grep -Fq "Success! App '896660'" "${STEAM_LOG}"; then
-
-        echo "$(timestamp) WARNING: SteamCMD update failed."
-
+    if (( update_ok )); then
+        echo "$(timestamp) INFO: SteamCMD update successful."
+    else
+        echo "$(timestamp) WARNING: SteamCMD update failed. See ${STEAM_LOG}"
         if [[ -x "${SERVER}/valheim_server.x86_64" ]] && \
            [[ -f "${SERVER}/valheim_server_Data/Managed/Assembly-CSharp.dll" ]]; then
-
-            echo "$(timestamp) WARNING: Existing Valheim files found."
-            echo "$(timestamp) WARNING: Attempting to start existing installation."
-
+            echo "$(timestamp) WARNING: Starting existing installation; version and completeness are NOT verified."
         else
             echo "$(timestamp) ERROR: No usable Valheim installation found."
             exit 1
         fi
-    else
-        echo "$(timestamp) INFO: SteamCMD update successful."
     fi
 fi
 
