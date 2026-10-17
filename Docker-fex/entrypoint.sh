@@ -318,6 +318,7 @@ FEX ./valheim_server.x86_64 \
     -backuplong "${SERVER_BACKUP_LONG}" \
     -savedir "${PERSISTENT}" \
     "${EXTRA_ARGS[@]}" \
+    -modifier portals casual \
     -nographics \
     -batchmode \
     > >(tee -a "${LOG_FILE}") 2>&1 &
